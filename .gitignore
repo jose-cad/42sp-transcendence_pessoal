@@ -1,0 +1,11 @@
+# Segredos
+.env
+
+# Planejamento local (rascunhos, fora do GitHub)
+plans/
+
+# Arquivos do projeto antigo (só referência, fora do GitHub)
+arquivos/
+
+# Rascunhos visuais do brainstorming
+.superpowers/
