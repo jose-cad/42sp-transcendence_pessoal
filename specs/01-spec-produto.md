@@ -185,6 +185,8 @@ O destaque some quando um operador responde. **[decisão dos líderes]**
 - Nada é apagado no encerramento. Conversa, documentos, vídeos e pagamentos continuam consultáveis pela busca.
 - Os dados pessoais de um motorista são apagados automaticamente **5 anos após o encerramento da última locação** dele. Os números agregados do painel podem permanecer anonimizados. **[decisão dos líderes]**
 - O prazo e o motivo aparecem na Política de Privacidade.
+- As fotos e os e-mails de aviso de Pix são enviados a uma IA externa gratuita (Gemini), que, no plano gratuito, pode usar esse conteúdo para melhorar os próprios modelos. A Política de Privacidade informa isso, e a demonstração usa só dados de teste. (Decisão do dono: o projeto é acadêmico e não tem verba para o plano pago.)
+- Dados pessoais trafegam criptografados em todo o sistema, inclusive entre as partes internas, e nunca são gravados em logs. (Decisão do dono.)
 
 ## 7. Telas
 
@@ -255,7 +257,7 @@ Abre como aba. Todos os números com filtro de período e atualização em tempo
 - **Locadora:** nome, CNPJ e endereço; editar ou excluir a locadora (só o dono).
 - **Equipe** (só o dono): incluir e excluir operadores.
 - **Caução:** número de semanas.
-- **E-mail do banco:** dados de acesso à caixa que recebe os avisos de Pix (só leitura).
+- **E-mail do banco:** dados de acesso à caixa que recebe os avisos de Pix (só leitura) e o endereço do remetente desses avisos (o banco), usado para filtrar a caixa. **[decisão dos líderes: remetente]**
 - **Categorias de preço:** criar e editar.
 - **WhatsApp:** conectar o número da locadora (cada locadora tem o seu, via QR code). **[decisão dos líderes]**
 - **Exportar e importar:** exportar dados (motoristas, carros, locações, pagamentos) em CSV, JSON e XML; importar carros em lote por CSV, com validação linha a linha. **[decisão dos líderes: o que se importa]**
@@ -315,9 +317,9 @@ Todos são feitos pelo operador.
 - **Restrições do dono para o plano técnico:** no mínimo **3 linguagens de programação**, **containers** e **mensageria** (fila de mensagens entre serviços). A escolha de quais é do plano técnico.
 - **Time simulado de 5 pessoas:** as tarefas serão divididas como num time real da 42 (PO, PM, Tech Lead, desenvolvedores), com papéis no README. Na prática há um único autor de commits, o que não atende "commits de todos os membros" do subject. É uma limitação conhecida, aceita porque o projeto não será avaliado de fato.
 - **WhatsApp:** automação não oficial, rodando num container. Usar um número de teste, porque números de automação podem ser bloqueados pelo WhatsApp.
-- **IA de imagem:** serviço externo gratuito. A chave fica no `.env`.
+- **IA:** serviço externo gratuito, usado para ler as fotos e os e-mails de aviso de Pix. A chave fica no `.env`.
 - **Repositório público:** o projeto é acompanhado pelo GitHub (como um avaliador da 42 acompanharia). Nenhuma credencial de e-mail, de IA ou de WhatsApp vai para o repositório, nem em exemplo. O sistema nunca se conecta a banco.
-- **Demonstração:** precisa funcionar numa máquina da escola subindo com um comando. Usa WhatsApp e IA reais: o dono já rodou automação de WhatsApp em container na escola com sucesso. Na demonstração basta uma locadora com número conectado.
+- **Demonstração:** precisa funcionar numa máquina da escola subindo com um comando. Usa WhatsApp e IA reais: o dono já rodou automação de WhatsApp em container com sucesso, na empresa. Ainda falta testar se WhatsApp, e-mail e IA funcionam a partir da rede da escola. Na demonstração basta uma locadora com número conectado.
 
 ## 11. Fica com quem construir
 
