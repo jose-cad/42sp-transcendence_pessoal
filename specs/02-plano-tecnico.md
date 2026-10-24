@@ -1,6 +1,6 @@
 # Plano técnico
 
-Status: aprovado pelo dono · 2026-10-17
+Status: aprovado pelo dono · 2026-10-17 · atualizado com os ajustes dos planos M0 a M7 em 2026-10-24
 Obedece a [`00-constituicao.md`](00-constituicao.md) e implementa [`01-spec-produto.md`](01-spec-produto.md). Esta parte diz **como** o produto vai ser construído. A divisão em tarefas vem no próximo documento.
 
 Marcações:
@@ -83,7 +83,7 @@ A tela única da spec (seção 7) e as páginas públicas. Fala **só com o core
 - histórico de alterações das entidades acima;
 - busca de motoristas e carros;
 - exportação e importação (seção 7.6);
-- tempo real: repassa ao navegador, por SignalR, os eventos que chegam da fila;
+- tempo real: avisa o navegador, por SignalR, do que chega da fila (só tipo e ids, seção 4.3);
 - configurações da locadora, incluindo a caixa de e-mail do banco (senha criptografada);
 - limpeza de dados pessoais após 5 anos (seção 6.8).
 
@@ -138,13 +138,13 @@ Container pronto, sem código nosso. Uma instância por locadora, com o nome igu
 3. **REST interno** quando quem pede precisa da resposta na hora (um cálculo para mostrar no formulário, a lista de alertas, confirmar um Pix e saber se deu certo). Só o core chama a cobrança, e só a cobrança e a leitura chamam o core.
 4. **Arquivo nunca viaja na fila.** Ele é gravado no core, e a mensagem leva só o id. (No mercado, isso se chama *claim check*.)
 5. Toda chamada REST interna leva o cabeçalho `X-Interno-Token`, com um segredo do `.env`. As chamadas que alteram dados levam também `X-Operador-Id` e `X-Operador-Nome`, para o histórico registrar quem fez a alteração.
-6. **Nenhum evento se perde (outbox).** Core e cobrança não publicam direto na fila. Eles gravam o evento numa tabela `outbox`, na mesma transação do dado que mudou. Uma rotina em segundo plano lê essa tabela, publica no RabbitMQ e marca o evento como enviado. Sem isso, uma locação poderia ser salva sem que a cobrança ficasse sabendo, e o motorista nunca seria cobrado. A leitura não tem banco, então publica direto: no pior caso, um aviso de e-mail é lido de novo no ciclo seguinte.
+6. **Nenhum evento se perde (outbox).** Core e cobrança não publicam direto na fila. Eles gravam o evento numa tabela `outbox`, na mesma transação do dado que mudou. Uma rotina em segundo plano lê essa tabela, publica no RabbitMQ e marca o evento como enviado; as linhas enviadas há mais de 1 dia são apagadas pela mesma rotina, e a exclusão da locadora apaga na hora os eventos dela que ainda estão na tabela (o envelope leva dado pessoal) **[decisão dos líderes]**. Sem isso, uma locação poderia ser salva sem que a cobrança ficasse sabendo, e o motorista nunca seria cobrado. A leitura não tem banco, então publica direto: no pior caso, um aviso de e-mail é lido de novo no ciclo seguinte.
 
 ### 4.2 RabbitMQ
 
 - Exchange `frota`, do tipo *topic*: a *routing key* é o nome do evento.
 - Uma fila durável por serviço consumidor (`core.eventos`, `cobranca.eventos`, `leitura.pedidos`), ligada só aos eventos que ele consome.
-- A exchange `evolution` é da Evolution API. Só a cobrança consome dela.
+- A exchange `evolution` é da Evolution API. Só a cobrança consome dela. As filas `evolution.*` (conexão, QR code e mensagens recebidas) também nascem no `definicoes.json`, com os argumentos exatos que a Evolution declara (com argumentos diferentes ela derrubaria o canal); a espera crescente das tentativas vem pela política `evolution-espera`, que cobre as filas `^evolution\.`.
 - Envelope de todo evento nosso, em JSON:
 
 ```json
@@ -168,21 +168,21 @@ Container pronto, sem código nosso. Uma instância por locadora, com o nome igu
 | `motorista.salvo` | core | cobrança | id, nome, telefone |
 | `motorista.anonimizado` | core | cobrança | id |
 | `carro.salvo` | core | cobrança | id, placa, modelo, dia de rodízio; km atual e km da última revisão **só na criação** (seção 6.5) |
-| `locacao.iniciada` | core | cobrança | id, motorista, carro, plano, preço semanal e os 3 preços congelados, semanas de caução, valor de caução e proporcional pagos, data de retirada, km inicial, locação anterior (na troca) |
-| `locacao.encerrada` | core | cobrança | id, data da devolução, km final, motivo (devolução ou troca) |
+| `locacao.iniciada` | core | cobrança | id, motorista, carro, plano, preço semanal e os 3 preços congelados, semanas de caução, valor de caução e proporcional pagos, data de retirada, km inicial, locação anterior (na troca), quem criou a locação e conferiu o pagamento da assinatura (`operadorId` e `operadorNome`, seção 6.5; já no contrato da T06 e preenchidos pela T24), percentual da multa por atraso congelado na locação (`multaAtrasoPercentual`; nasce na T58). Na troca, o valor de caução é só a diferença paga e o proporcional inclui o dia da troca (muda na T45) |
+| `locacao.encerrada` | core | cobrança | id, data da devolução, km final, motivo (devolução ou troca), quem registrou o encerramento (`operadorId` e `operadorNome`; nascem na T45) |
 | `whatsapp.envio_solicitado` | core | cobrança | mensagem id, telefone, texto ou arquivo id, operador |
-| `conversa.mensagem_recebida` | cobrança | core | id do WhatsApp, telefone, motorista (se conhecido), texto, arquivo id, data |
+| `conversa.mensagem_recebida` | cobrança | core | id do WhatsApp, telefone, motorista (se conhecido), texto, arquivo id, data, tipo de mídia (`midia`: imagem, vídeo, áudio, documento, figurinha, localização ou outra; vazio no texto; nasce na T30) |
 | `conversa.mensagem_enviada` | cobrança | core | autor (bot ou operador), mensagem id, texto ou arquivo id, situação (enviada ou falhou) |
 | `conversa.precisa_resposta` | cobrança | core | motorista ou telefone (acende o destaque vermelho) |
 | `whatsapp.conexao_atualizada` | cobrança | core | situação, QR code (quando houver) |
-| `alerta.criado` / `alerta.atualizado` | cobrança | core | alerta resumido (tipo, motorista, carro, detalhe, hora, tratado) |
+| `alerta.criado` / `alerta.atualizado` | cobrança | core | alerta resumido (tipo, motorista, carro, detalhe, hora, tratado); a lista de tipos ganha `BLOQUEAR_VEICULO` na T58 |
 | `painel.mudou` | cobrança | core | — (o front busca os números de novo) |
 | `motorista.situacao_mudou` | cobrança | core | motorista id (o front atualiza o painel inferior) |
 | `leitura.imagem_solicitada` | cobrança | leitura | arquivo id |
 | `leitura.imagem_lida` | leitura | cobrança | arquivo id, tipo, km ou valor/data/horário/pagador, confiança, ou falha |
 | `leitura.aviso_pix_lido` | leitura | cobrança | Message-ID, valor, data, horário, pagador (se houver) |
 
-O core repassa ao navegador, por SignalR, os eventos `conversa.*`, `alerta.*`, `painel.mudou`, `motorista.situacao_mudou` e `whatsapp.conexao_atualizada`, só para os operadores da locadora do evento (um grupo do SignalR por locadora).
+O core não repassa ao navegador os eventos `conversa.*`, `alerta.*`, `painel.mudou`, `motorista.situacao_mudou` e `whatsapp.conexao_atualizada`: manda por SignalR só um aviso com o tipo e os ids, só para os operadores da locadora do evento (um grupo do SignalR por locadora), e o front busca o dado na API. Nenhum dado pessoal nem o QR code passa pelo WebSocket.
 
 ### 4.4 REST interno
 
@@ -194,12 +194,14 @@ O core repassa ao navegador, por SignalR, os eventos `conversa.*`, `alerta.*`, `
 **Cobrança oferece** (só para o core):
 - cálculos: assinatura, encerramento e troca. O formulário mostra o valor antes de salvar, e o core pede o cálculo de novo ao salvar, sem confiar no valor que veio do navegador;
 - alertas: listar (com filtros, ordenação e paginação) e marcar como tratado;
-- pagamentos: confirmar, recusar, atribuir a uma cobrança; multas: cancelar (spec, 6.3.1);
+- pagamentos: confirmar, recusar, atribuir a uma cobrança; multas: cancelar (spec, 6.3.1); cobranças: dar baixa manual;
 - leituras de km: corrigir; revisões: registrar;
 - situação do motorista (semana, multa, km × franquia, caução) e do carro (km atual, km para a revisão);
 - caução: lançar desconto;
 - painel: números por período;
-- WhatsApp: conectar (devolve o QR code) e ver a situação da conexão.
+- WhatsApp: conectar (`POST /interno/whatsapp/conectar`, devolve o QR code) e ver a situação da conexão (`GET /interno/whatsapp`).
+
+O nome do operador vai codificado em `X-Operador-Nome` (`Uri.EscapeDataString` no core, decodificado em UTF-8 na cobrança), porque cabeçalho HTTP só leva ASCII: "João" viaja como `Jo%C3%A3o`.
 
 Os caminhos exatos e os formatos de cada chamada são definidos nas tarefas, mas cada tela do front só pode chamar um caminho que esteja listado na tarefa correspondente do core (problema do projeto antigo: o front chamava rotas que não existiam).
 
@@ -238,21 +240,21 @@ Os caminhos exatos e os formatos de cada chamada são definidos nas tarefas, mas
 
 ### 6.2 Banco `core`
 
-`locadoras` (nome, CNPJ, endereço, semanas de caução, caixa de e-mail: servidor, usuário, senha criptografada, remetente do banco) · usuários do Identity (com `locadora_id` e `eh_dono`) · `convites` (e-mail liberado pelo dono) · `categorias_preco` (nome, 3 preços) · `carros` · `motoristas` · `locacoes` (plano, preço semanal e os 3 preços congelados, caução, datas, km inicial e final, locação anterior) · `arquivos` (a que pertence, tipo, nome original, caminho, tamanho, SHA-256, excluído em/por) · `conversas` (motorista ou telefone não cadastrado, precisa de resposta) · `mensagens` (autor: motorista, bot ou operador; operador; texto ou arquivo; id do WhatsApp; situação) · `historico_alteracoes`.
+`locadoras` (nome, CNPJ, endereço, semanas de caução, multa por atraso (`multa_atraso_percentual`, `numeric(5,2)`, padrão 0), caixa de e-mail: servidor, usuário, senha criptografada, remetente do banco) · usuários do Identity (com `locadora_id` e `eh_dono`) · `convites` (e-mail liberado pelo dono) · `categorias_preco` (nome, 3 preços) · `carros` · `motoristas` (com `criado_em` e `anonimizado_em`; os dados pessoais aceitam nulo, para a anonimização) · `locacoes` (plano, preço semanal e os 3 preços congelados, caução, `multa_atraso_percentual` congelada (`numeric(5,2)`, padrão 0), datas, km inicial e final, locação anterior, `motivo_fim`, `credito_usado`) · `arquivos` (a que pertence, tipo, nome original, caminho, tamanho, SHA-256, excluído em/por) · `conversas` (motorista ou telefone não cadastrado, precisa de resposta; o telefone aceita nulo) · `mensagens` (autor: motorista, bot ou operador; operador; texto ou arquivo; id do WhatsApp; situação) · `historico_alteracoes`. **[decisão dos líderes]** Conversas e mensagens não têm histórico de alterações (a mensagem já é o registro); o vínculo de número a um motorista fica no histórico do motorista.
 
 ### 6.3 Banco `cobranca`
 
-Cópias: `motoristas_ref`, `carros_ref`, `locacoes_ref` · `cobrancas` (semana, multa ou saldo devedor; valor; vencimento; situação) · `pagamentos` (comprovante, valor, data, horário, pagador, situação, cobrança quitada, aviso de e-mail casado) · `avisos_pix_email` · `creditos` · `lancamentos_caucao` (entrada, desconto, devolução) · `leituras_km` (carro, locação, km, origem: foto ou operador, arquivo, suspeita) · `revisoes` · `alertas` (tipo, motorista, carro, detalhe, criado em, tratado por e em) · `estado_bot` (falhas seguidas de foto por motorista) · `instancias_whatsapp` · `historico_alteracoes`.
+Cópias: `motoristas_ref`, `carros_ref`, `locacoes_ref` (com `contrato_id`, `motivo_fim`, o acerto e o percentual da multa por atraso) · `cobrancas` (assinatura, semana, multa de km, multa por atraso ou saldo devedor; valor, valor pago, vencimento, situação, quem cancelou) · `pagamentos` (comprovante, valor, data, horário, pagador, situação, cobrança quitada, aviso de e-mail casado) · `quitacoes` (cobrança quitada, pagamento e origem: pagamento, crédito, caução ou baixa manual, esta com operador e motivo) · `avisos_pix_email` · `creditos` (por contrato) · `lancamentos_caucao` (entrada, desconto, devolução, crédito e saldo devedor do acerto; por contrato e, no acerto, ligados à cobrança) · `leituras_km` (carro, locação, km, origem: foto ou operador, arquivo, suspeita) · `leituras_pendentes` (foto de hodômetro esperando a leitura da IA) · `revisoes` · `alertas` (tipo, motorista, carro, detalhe, criado em, tratado por e em) · `estado_bot` (falhas seguidas de foto por motorista) · `instancias_whatsapp` · `envios` (fila de envio do WhatsApp; a linha some depois do envio) · `mensagens_recebidas` (id de cada mensagem recebida, para ignorar repetidas) · `pendencias_resposta` (telefone com resposta pendente) · `eventos_processados` (ids dos eventos já tratados, para ignorar repetidos) · `historico_alteracoes`.
 
 `outbox` existe nos dois bancos (seção 4.1, regra 6).
 
 ### 6.5 Quem é dono de cada dado de fronteira **[decisão dos líderes]**
 
-- **Pagamento da assinatura.** O operador confere esse pagamento fora do bot (spec, 6.2). Ao salvar a locação, o core pede o cálculo de novo à cobrança e envia em `locacao.iniciada` o que foi pago. A cobrança registra a caução como entrada em `lancamentos_caucao` e o proporcional como uma cobrança do tipo "assinatura", já paga e confirmada pelo operador que criou a locação. Os dois entram no "recebido" do painel. Na troca, a cobrança aplica as regras da spec (6.6): a caução passa adiante, e a diferença e o crédito dos dias não usados entram no cálculo da assinatura da nova locação.
+- **Pagamento da assinatura.** O operador confere esse pagamento fora do bot (spec, 6.2). Ao salvar a locação, o core pede o cálculo de novo à cobrança e envia em `locacao.iniciada` o que foi pago. A cobrança registra a caução como entrada em `lancamentos_caucao` e o proporcional como uma cobrança do tipo "assinatura", já paga e confirmada pelo operador que criou a locação. O proporcional entra no recebido do painel; a caução só quando é usada para pagar uma cobrança. Na troca, a cobrança aplica as regras da spec (6.6): a caução passa adiante, e a diferença e o crédito dos dias não usados entram no cálculo da assinatura da nova locação.
 - **Km do carro.** O core manda o km atual e o km da última revisão só ao criar o carro. Depois disso, a dona desses valores é a cobrança: o km muda por foto ou por correção de leitura, e a revisão muda por "Registrar revisão". O formulário de edição do carro não mostra esses dois campos.
 - **Leituras de km vindas de locação.** Ao receber `locacao.iniciada` e `locacao.encerrada`, a cobrança cria as leituras de km com origem "operador", a partir do km inicial e do km final. Na troca só de plano, a leitura do dia é o km final da locação antiga e também o km inicial da nova.
 - **Número não cadastrado.** O bot responde com o texto padrão da seção 6.5 da spec e cria o alerta "mensagem para responder". Uma foto de número não cadastrado não vai para a IA, porque não há locação a que ela pertença. Vincular o número a um motorista (spec, 7.1) passa a usar esse telefone como o WhatsApp do motorista, com registro no histórico. Isso gera `motorista.salvo`, e a cobrança passa a reconhecer o número.
-- **Anonimização de 5 anos (spec, 6.8; constituição, item 12).** O core apaga do motorista nome, CPF, RG, CNH, telefone, endereço e e-mail (a linha fica como "motorista removido"), apaga o texto das mensagens dele e todos os arquivos ligados a ele e às locações dele. A cobrança, ao receber `motorista.anonimizado`, apaga nome e telefone de `motoristas_ref` e o nome do pagador em `pagamentos` e `avisos_pix_email`. Valores, datas e km ficam, sem ligação com uma pessoa identificável, para os números do painel.
+- **Anonimização de 5 anos (spec, 6.8; constituição, item 12).** O core apaga do motorista nome, CPF, RG, CNH, telefone, endereço e e-mail (a linha fica como "motorista removido"), apaga o texto das mensagens dele e todos os arquivos ligados a ele e às locações dele, e limpa o motivo e os valores anterior e novo do histórico de alterações dele. A cobrança, ao receber `motorista.anonimizado`, apaga nome e telefone de `motoristas_ref` e o nome do pagador em `pagamentos` e `avisos_pix_email`, os textos livres de operador ligados a ele (motivos e descrições de cobranças, quitações, lançamentos de caução, leituras e pagamentos, e o detalhe dos alertas), as linhas de controle do bot do telefone dele (pendências de resposta, estado do bot, envios e mensagens recebidas) e, no histórico de alterações, o motivo e os valores de campos de texto. Valores, datas e km ficam, sem ligação com uma pessoa identificável, para os números do painel.
 - **Cópia ainda desatualizada.** Se o core pedir um cálculo de uma locação que a cobrança ainda não recebeu (por exemplo, uma troca logo após criar a locação), a cobrança responde "tente de novo em instantes" (HTTP 409) em vez de calcular com dado errado.
 
 ### 6.6 Arquivos **[decisão dos líderes]**
@@ -261,6 +263,7 @@ Cópias: `motoristas_ref`, `carros_ref`, `locacoes_ref` · `cobrancas` (semana, 
 - SHA-256 calculado no upload. Ao abrir, o core recalcula e o front mostra "íntegro" ou "alterado".
 - Download e visualização só por rota autenticada do core, que confere a locadora.
 - Tipos: PDF, JPEG, PNG, WEBP, MP4. Limites: 10 MB para imagem, 20 MB para PDF, 300 MB para vídeo. São validados no navegador, no nginx (tamanho) e no core (tipo pelo conteúdo do arquivo e tamanho).
+- Os documentos de motorista e de locação são enviados logo depois de salvar o cadastro, ligados a ele (não antes, soltos), para nenhum ficar órfão (sem dono, fora do alcance da limpeza de 5 anos). Consequência: o banco não impede uma locação sem documento; quem garante é o formulário. **[decisão dos líderes]**
 - Excluir marca o arquivo como excluído e registra no histórico. O conteúdo some do disco na hora.
 
 ## 7. Segurança e segredos
@@ -268,15 +271,16 @@ Cópias: `motoristas_ref`, `carros_ref`, `locacoes_ref` · `cobrancas` (semana, 
 - Senhas com o hash do Identity. 2FA por app autenticador (TOTP: o código de 6 dígitos que muda a cada 30 segundos). Bloqueio temporário após tentativas erradas e limite de requisições no login.
 - Sessão em cookie `HttpOnly`, `Secure`, `SameSite=Strict`. Como front e API estão no mesmo endereço, não precisa de CORS nem de token no JavaScript. **[decisão dos líderes]**
 - Excluir um operador invalida as sessões dele na hora (o Identity troca o *security stamp*, um carimbo que as sessões antigas deixam de reconhecer).
+- Erros do uso normal (senha ou código errado, sem sessão, e-mail já usado, conflito entre dois operadores) respondem 200 com `{ok: false, motivo, mensagem}`; os que só acontecem burlando o front mantêm o status HTTP (400, 401, 403, 404, 429). Motivo: o Chrome escreve no console toda resposta 4xx (constituição, item 2). **[decisão do dono]**
 - Validação dupla: Zod no front, validação do ASP.NET no core, Bean Validation na cobrança.
-- `.env` fora do Git e `.env.example` versionado só com nomes e valores falsos: senhas do Postgres e do RabbitMQ, token interno, chave do Gemini, chave da Evolution API, chave do Data Protection.
+- `.env` fora do Git e `.env.example` versionado só com nomes e valores falsos: senhas do Postgres e do RabbitMQ, token interno, chave do Gemini, chave da Evolution API, chave do Data Protection (`DATA_PROTECTION_CHAVE`, gerada com `openssl rand -hex 32`): ela cifra as chaves do Data Protection guardadas no volume `chaves`.
 - A senha da caixa de e-mail do banco é digitada pelo dono nas Configurações e gravada criptografada no banco. Nunca vai para o `.env` nem para o Git.
 
 ### 7.1 Proteção de dados pessoais (LGPD) **[decisão do dono: proteger contra interceptação e vazamento]**
 
 - **Em trânsito:** criptografado em todo lugar, do navegador até o banco (seção 3.6).
 - **Banco:** nenhuma porta do Postgres, do RabbitMQ ou da Evolution API é publicada na máquina, então só os containers da rede interna alcançam esses serviços. Cada serviço tem usuário e senha próprios, vindos do `.env`, e o `.env.example` não traz senha utilizável. Nenhum serviço usa o usuário administrador do Postgres.
-- **Logs:** nunca entram nos logs nome, CPF, RG, CNH, telefone, endereço, e-mail, texto de mensagem, conteúdo de imagem, resposta do Gemini, senha, token ou chave. Os logs registram só ids (de motorista, locação, arquivo, evento) e o `correlacao` do envelope. O registro de dados sensíveis do EF Core (`EnableSensitiveDataLogging`) e o log de SQL com valores do Hibernate ficam desligados. A Evolution API roda com log mínimo, sem o conteúdo das mensagens.
+- **Logs:** nunca entram nos logs nome, CPF, RG, CNH, telefone, endereço, e-mail, texto de mensagem, conteúdo de imagem, resposta do Gemini, senha, token ou chave. Os logs registram só ids (de motorista, locação, arquivo, evento) e o `correlacao` do envelope. O registro de dados sensíveis do EF Core (`EnableSensitiveDataLogging`) e o log de SQL com valores do Hibernate ficam desligados. A Evolution API roda com log mínimo, sem o conteúdo das mensagens. O nginx não grava log de acesso (`access_log off`), porque a URL leva CPF e texto de busca **[decisão dos líderes]**.
 - **Erros:** a resposta de erro que vai ao navegador nunca traz detalhe interno (stack trace, SQL).
 - **Acesso:** dados pessoais só com login e só da própria locadora (seção 6.1). Os arquivos só saem pela rota autenticada do core (seção 6.6).
 - **Apagamento:** limpeza automática de 5 anos (seção 6.5) e exclusão imediata da locadora (spec, seção 5).
@@ -284,8 +288,8 @@ Cópias: `motoristas_ref`, `carros_ref`, `locacoes_ref` · `cobrancas` (semana, 
 
 ## 8. Agendamentos **[decisão dos líderes]**
 
-- **Cobrança** (`@Scheduled` do Spring, fuso `America/Sao_Paulo`): segunda 0h abre as cobranças da semana; 9h primeiro lembrete; 12h segundo lembrete; 15h alertas e cobranças em atraso; todo dia confere caução com 30 dias, revisão próxima e revisão vencida.
-- **Core** (serviço em segundo plano do .NET, uma vez por dia): apaga dados pessoais de motoristas 5 anos após a última locação, apaga os arquivos e publica `motorista.anonimizado`.
+- **Cobrança** (`@Scheduled` do Spring, fuso `America/Sao_Paulo`): segunda 0h abre as cobranças da semana; 9h primeiro lembrete; 12h segundo lembrete; 15h alertas e cobranças em atraso e, depois dos alertas, verifica os bloqueios; todo dia 0h05 conta um dia nas multas por atraso; todo dia 3h limpa dados de números não cadastrados e avisos de e-mail sem pagamento com 5 anos; todo dia 8h confere revisão próxima e vencida e faz o acerto da caução dos contratos devolvidos há 30 dias.
+- **Core** (serviço em segundo plano do .NET; a limpeza roda ao subir e a cada 24 horas): apaga dados pessoais de motoristas 5 anos após a última locação, apaga os arquivos e publica `motorista.anonimizado`.
 - **Leitura:** laço com espera de 2 minutos para o e-mail.
 - Cada serviço roda com uma única instância, então nenhum agendamento dispara duas vezes.
 
@@ -320,8 +324,12 @@ frontend/                React
 services/core/           C#
 services/cobranca/       Java
 services/leitura/        Python
-infra/nginx/             configuração e geração do certificado
+infra/nginx/             configuração
+infra/certs/             gerador da autoridade certificadora e dos certificados
 infra/postgres/          script que cria os bancos
+infra/rabbitmq/          configuração e definições (exchanges, filas, política)
+infra/testes/            testes de fumaça da infra
+infra/demo/              dados de demonstração (entra no M7)
 docker-compose.yml
 .env.example
 README.md

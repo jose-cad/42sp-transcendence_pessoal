@@ -20,7 +20,7 @@ Referência: subject do ft_transcendence v19 (42 São Paulo).
 
 10. **Explicável.** Todo código precisa poder ser explicado e alterado ao vivo pelo dono do projeto durante a avaliação. Nada construído "para o futuro": sem abstração, configuração ou funcionalidade que nenhuma spec pediu.
 11. **Módulo só conta funcionando.** Nenhum módulo é declarado no README sem funcionar de ponta a ponta numa demonstração.
-12. **Dados pessoais (LGPD).** Dados de motoristas são dados pessoais: só acessíveis com login, cada locadora vê apenas os seus, e são apagados automaticamente 5 anos após o encerramento da última locação do motorista.
+12. **Dados pessoais (LGPD).** Dados de motoristas são dados pessoais: só acessíveis com login, cada locadora vê apenas os seus, e são apagados automaticamente 5 anos após o encerramento da última locação do motorista, ou após o cadastro, se ele nunca alugou.
 13. **Dinheiro é rastreável e testado.** Todo valor em dinheiro calculado pelo sistema (cobranças proporcionais, multas, devoluções) tem teste automatizado. Toda alteração de dado de negócio fica registrada no histórico: quem, quando, valor anterior e novo.
 14. **Spec antes do código.** Nada é implementado sem estar na spec. Se for preciso mudar, a spec muda primeiro.
 15. **Branch e PR.** Tudo entra na `main` por branch e Pull Request, com mensagens de commit claras que descrevem a mudança. Nada é enviado direto para a `main`.
